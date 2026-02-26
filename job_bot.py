@@ -9,7 +9,11 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 
 RSS_URL = 'https://weworkremotely.com/categories/remote-programming-jobs.rss'
-TARGET_SKILLS = ['python', 'javascript', 'angular', 'frontend', 'c programming']
+TARGET_SKILLS = [
+    'python', 'javascript', 'react', 'node.js', 'express', 'mysql', 'mongodb', 
+    'php', 'opencv', 'tensorflow', 'mediapipe', 'langchain', 'full-stack', 
+    'backend', 'frontend', 'ai', 'computer vision'
+]
 
 def init_db():
     """Creates the database and table if they don't exist."""

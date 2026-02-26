@@ -1,0 +1,39 @@
+name: Telegram Job Scraper
+
+# This tells GitHub WHEN to run the script
+on:
+  schedule:
+    - cron: '0 * * * *' # Runs at minute 0 past every hour
+  workflow_dispatch: # Allows you to trigger it manually by clicking a button
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Job Scraper
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python job_bot.py
+
+      - name: Commit and Push Updated Database
+        # This step saves the updated SQLite DB back to your repo so it remembers for next time
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add jobs.db
+          # Only commit if there are changes to the database
+          git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update seen jobs database"
+          git push

@@ -3,6 +3,8 @@ import feedparser
 import sqlite3
 import time
 import os
+import html
+import re
 
 # Pull secrets from environment variables (crucial for GitHub Actions)
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
@@ -30,11 +32,21 @@ def init_db():
 def send_telegram_alert(job_title, job_link):
     """Pushes the formatted message to your Telegram chat."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    message = f"🚀 <b>New Job Match!</b>\n\n<b>Role:</b> {job_title}\n<b>Link:</b> {job_link}"
+    
+    # Escape HTML special characters to prevent Telegram API errors
+    safe_title = html.escape(job_title)
+    
+    message = f"🚀 <b>New Job Match!</b>\n\n<b>Role:</b> {safe_title}\n<b>Link:</b> {job_link}"
     payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
     
-    response = requests.post(url, json=payload)
-    return response.status_code == 200
+    try:
+        response = requests.post(url, json=payload)
+        if response.status_code != 200:
+            print(f"Failed to send alert: {response.status_code} - {response.text}")
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Exception sending alert: {e}")
+        return False
 
 def scan_jobs():
     """Fetches the RSS feed, checks the DB, and filters for skills."""
@@ -52,8 +64,11 @@ def scan_jobs():
         if cursor.fetchone():
             continue # Skip to the next job if it's already in the DB
             
-        # 2. Check if it matches your stack
-        if any(skill in title for skill in TARGET_SKILLS):
+        # 2. Check if it matches your stack (using regex for word boundaries)
+        # We replace some symbols in title or use word boundaries so 'ai' doesn't match 'email'
+        matched_skills = [skill for skill in TARGET_SKILLS if re.search(rf'\b{re.escape(skill)}\b', title)]
+        if matched_skills:
+            print(f"Matched skills: {matched_skills} for job: {entry.title}")
             success = send_telegram_alert(entry.title, link)
             
             # 3. If sent successfully, save to DB so we don't send it again
@@ -61,7 +76,9 @@ def scan_jobs():
                 print(f"Alert sent: {entry.title}")
                 cursor.execute('INSERT INTO seen_jobs (link) VALUES (?)', (link,))
                 conn.commit()
-                time.sleep(1) 
+                time.sleep(1)
+            else:
+                print("Failed to send, not inserting into DB to retry later.") 
 
     conn.close()
     print("Scan complete.")

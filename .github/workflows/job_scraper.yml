@@ -28,7 +28,18 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python job_bot.py
+          JOB_QUERY: ${{ vars.JOB_QUERY }}
+          JOB_LOCATION: ${{ vars.JOB_LOCATION }}
+          MAX_JOBS_PER_SOURCE: ${{ vars.MAX_JOBS_PER_SOURCE }}
+          FRESHER_ONLY: ${{ vars.FRESHER_ONLY }}
+          MAX_FRESHER_EXPERIENCE_YEARS: ${{ vars.MAX_FRESHER_EXPERIENCE_YEARS }}
+        run: |
+          export JOB_QUERY="${JOB_QUERY:-python developer}"
+          export JOB_LOCATION="${JOB_LOCATION:-India}"
+          export MAX_JOBS_PER_SOURCE="${MAX_JOBS_PER_SOURCE:-25}"
+          export FRESHER_ONLY="${FRESHER_ONLY:-true}"
+          export MAX_FRESHER_EXPERIENCE_YEARS="${MAX_FRESHER_EXPERIENCE_YEARS:-1}"
+          python job_bot.py
 
       - name: Commit and Push Updated Database
         # This step saves the updated SQLite DB back to your repo so it remembers for next time

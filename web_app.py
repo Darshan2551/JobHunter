@@ -241,6 +241,12 @@ def jobs_api():
     return jsonify({"count": len(jobs), "jobs": jobs})
 
 
+@app.route("/health")
+def health():
+    init_dashboard_db()
+    return jsonify({"status": "ok"})
+
+
 @app.route("/export.csv")
 def export_csv():
     init_dashboard_db()
@@ -284,4 +290,5 @@ def export_csv():
 
 if __name__ == "__main__":
     init_dashboard_db()
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    port = safe_int(os.environ.get("PORT"), 5000)
+    app.run(host="0.0.0.0", port=port, debug=False)

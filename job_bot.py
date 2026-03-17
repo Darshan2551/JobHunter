@@ -4,6 +4,7 @@ import os
 import re
 import sqlite3
 import time
+from datetime import datetime, timezone
 from urllib.parse import urljoin
 
 import requests
@@ -186,7 +187,7 @@ def build_job_key(job):
 
 
 def init_db():
-    """Creates the database and table if they don't exist."""
+    """Creates the database tables if they don't exist."""
     conn = sqlite3.connect("jobs.db")
     cursor = conn.cursor()
     cursor.execute(
@@ -196,8 +197,75 @@ def init_db():
         )
         """
     )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sent_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_key TEXT UNIQUE NOT NULL,
+            source TEXT NOT NULL,
+            title TEXT NOT NULL,
+            company TEXT,
+            location TEXT,
+            link TEXT NOT NULL,
+            matched_skills TEXT,
+            all_skills TEXT,
+            description TEXT,
+            min_experience REAL,
+            max_experience REAL,
+            sent_at TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_sent_alerts_sent_at
+        ON sent_alerts(sent_at DESC)
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_sent_alerts_source
+        ON sent_alerts(source)
+        """
+    )
     conn.commit()
     return conn
+
+
+def save_sent_alert(cursor, job_key, job, matched_skills):
+    """Persists successfully sent alerts for dashboard use."""
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO sent_alerts (
+            job_key,
+            source,
+            title,
+            company,
+            location,
+            link,
+            matched_skills,
+            all_skills,
+            description,
+            min_experience,
+            max_experience,
+            sent_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            job_key,
+            clean_text(job.get("source", "Unknown")),
+            clean_text(job.get("title", "Untitled role")),
+            clean_text(job.get("company")),
+            clean_text(job.get("location")),
+            clean_text(job.get("link")),
+            clean_text(", ".join(matched_skills)),
+            clean_text(job.get("skills")),
+            clean_text(job.get("description")),
+            to_float(job.get("min_experience")),
+            to_float(job.get("max_experience")),
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        ),
+    )
 
 
 def send_telegram_alert(session, job, matched_skills):
@@ -657,6 +725,7 @@ def scan_jobs():
         print(f"Matched {matched_skills} -> {job.get('source')} | {job.get('title')}")
         success = send_telegram_alert(session, job, matched_skills)
         if success:
+            save_sent_alert(cursor, job_key, job, matched_skills)
             cursor.execute("INSERT INTO seen_jobs (link) VALUES (?)", (job_key,))
             conn.commit()
             sent_count += 1

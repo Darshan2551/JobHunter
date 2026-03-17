@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Job Alert Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+    <main class="page-shell">
+        <header class="hero">
+            <div class="hero-text">
+                <p class="eyebrow">Telegram Alert Tracker</p>
+                <h1>Job Alerts Dashboard</h1>
+                <p class="subtitle">All jobs successfully sent to Telegram, grouped by platform.</p>
+            </div>
+            <div class="hero-actions">
+                <a class="btn ghost" href="/api/jobs?q={{ filters.q|urlencode }}&source={{ filters.source|urlencode }}&days={{ filters.days|urlencode }}" target="_blank" rel="noopener noreferrer">Open JSON API</a>
+            </div>
+        </header>
+
+        <section class="stats-grid">
+            <article class="stat-card">
+                <p>Total Jobs</p>
+                <strong>{{ stats.total_jobs }}</strong>
+            </article>
+            <article class="stat-card">
+                <p>Sent Today</p>
+                <strong>{{ stats.today_jobs }}</strong>
+            </article>
+            <article class="stat-card">
+                <p>Companies</p>
+                <strong>{{ stats.companies }}</strong>
+            </article>
+            <article class="stat-card">
+                <p>Active Platforms</p>
+                <strong>{{ stats.active_sources }}</strong>
+            </article>
+        </section>
+
+        <section class="filter-wrap">
+            <form class="filters" method="get" action="/">
+                <label>
+                    Search
+                    <input type="text" name="q" value="{{ filters.q }}" placeholder="Role, company, skills, location">
+                </label>
+
+                <label>
+                    Platform
+                    <select name="source">
+                        <option value="all" {% if filters.source|lower == "all" %}selected{% endif %}>All Platforms</option>
+                        {% for source in source_order %}
+                        <option value="{{ source }}" {% if filters.source == source %}selected{% endif %}>{{ source }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <label>
+                    Time Window
+                    <select name="days">
+                        <option value="1" {% if filters.days == "1" %}selected{% endif %}>Last 1 day</option>
+                        <option value="3" {% if filters.days == "3" %}selected{% endif %}>Last 3 days</option>
+                        <option value="7" {% if filters.days == "7" %}selected{% endif %}>Last 7 days</option>
+                        <option value="15" {% if filters.days == "15" %}selected{% endif %}>Last 15 days</option>
+                        <option value="30" {% if filters.days == "30" %}selected{% endif %}>Last 30 days</option>
+                        <option value="90" {% if filters.days == "90" %}selected{% endif %}>Last 90 days</option>
+                        <option value="all" {% if filters.days == "all" %}selected{% endif %}>All time</option>
+                    </select>
+                </label>
+
+                <div class="filter-actions">
+                    <button class="btn primary" type="submit">Apply Filters</button>
+                    <a class="btn ghost" href="/">Reset</a>
+                    <a class="btn ghost" href="/export.csv?q={{ filters.q|urlencode }}&source={{ filters.source|urlencode }}&days={{ filters.days|urlencode }}">Export CSV</a>
+                </div>
+            </form>
+        </section>
+
+        <section class="board-wrap">
+            <div class="board">
+                {% for source in source_order %}
+                <article class="source-column">
+                    <header class="source-header">
+                        <h2>{{ source }}</h2>
+                        <span class="count">{{ jobs_by_source[source]|length }}</span>
+                    </header>
+
+                    <div class="card-stack">
+                        {% if jobs_by_source[source]|length == 0 %}
+                        <p class="empty-state">No jobs in this view.</p>
+                        {% else %}
+                        {% for job in jobs_by_source[source] %}
+                        <article class="job-card" style="--delay: {{ loop.index0 }};">
+                            <h3>{{ job.title }}</h3>
+                            <p class="meta">{{ job.company }}</p>
+                            <p class="meta">{{ job.location }}</p>
+                            <p class="sent-at">Sent: {{ job.sent_at_display }}</p>
+
+                            {% if job.matched_skills_list %}
+                            <div class="chips">
+                                {% for skill in job.matched_skills_list %}
+                                <span class="chip">{{ skill }}</span>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+
+                            <div class="card-actions">
+                                <a class="btn primary apply-btn" href="{{ job.link }}" target="_blank" rel="noopener noreferrer">Apply</a>
+                                <button class="btn ghost copy-btn" type="button" data-link="{{ job.link }}">Copy Link</button>
+                            </div>
+                        </article>
+                        {% endfor %}
+                        {% endif %}
+                    </div>
+                </article>
+                {% endfor %}
+            </div>
+        </section>
+    </main>
+
+    <div id="toast" class="toast" aria-live="polite"></div>
+
+    <script>
+        (function () {
+            const toast = document.getElementById("toast");
+            function showToast(message) {
+                toast.textContent = message;
+                toast.classList.add("show");
+                setTimeout(() => toast.classList.remove("show"), 1800);
+            }
+
+            document.querySelectorAll(".copy-btn").forEach((button) => {
+                button.addEventListener("click", async () => {
+                    const link = button.getAttribute("data-link");
+                    if (!link) return;
+                    try {
+                        await navigator.clipboard.writeText(link);
+                        showToast("Link copied");
+                    } catch (error) {
+                        showToast("Copy failed");
+                    }
+                });
+            });
+        })();
+    </script>
+</body>
+</html>

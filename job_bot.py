@@ -15,6 +15,12 @@ CHAT_ID = os.environ.get("CHAT_ID")
 JOB_QUERY = os.environ.get("JOB_QUERY", "python developer")
 JOB_LOCATION = os.environ.get("JOB_LOCATION", "India")
 REQUEST_TIMEOUT_SECONDS = 25
+FRESHER_ONLY = os.environ.get("FRESHER_ONLY", "true").lower() in {"1", "true", "yes", "y"}
+
+try:
+    MAX_FRESHER_EXPERIENCE_YEARS = float(os.environ.get("MAX_FRESHER_EXPERIENCE_YEARS", "1"))
+except ValueError:
+    MAX_FRESHER_EXPERIENCE_YEARS = 1.0
 
 try:
     MAX_JOBS_PER_SOURCE = max(5, min(int(os.environ.get("MAX_JOBS_PER_SOURCE", "25")), 100))
@@ -49,6 +55,18 @@ COMMON_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+FRESHER_KEYWORDS = [
+    "fresher",
+    "entry level",
+    "entry-level",
+    "new grad",
+    "graduate",
+    "trainee",
+    "intern",
+    "internship",
+    "apprentice",
+]
+
 
 def clean_text(value):
     """Normalizes whitespace and HTML entities."""
@@ -68,6 +86,75 @@ def slugify(value):
     """Converts a text to a URL-safe slug."""
     slug = re.sub(r"[^a-z0-9]+", "-", clean_text(value).lower())
     return slug.strip("-")
+
+
+def to_float(value):
+    """Converts value to float, returns None if conversion fails."""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def extract_experience_from_text(text):
+    """
+    Best-effort parse of experience ranges from free text.
+    Returns (min_exp, max_exp) as floats or (None, None) if not found.
+    """
+    text_lc = clean_text(text).lower()
+    if not text_lc:
+        return (None, None)
+
+    range_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)?",
+        text_lc,
+    )
+    if range_match:
+        return (to_float(range_match.group(1)), to_float(range_match.group(2)))
+
+    plus_match = re.search(r"(\d+(?:\.\d+)?)\s*\+\s*(?:years?|yrs?)", text_lc)
+    if plus_match:
+        min_exp = to_float(plus_match.group(1))
+        return (min_exp, None)
+
+    single_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:years?|yrs?)", text_lc)
+    if single_match:
+        single_exp = to_float(single_match.group(1))
+        return (single_exp, single_exp)
+
+    return (None, None)
+
+
+def is_fresher_job(job):
+    """
+    Returns True when a role looks suitable for freshers.
+    Priority order: numeric experience fields -> text parsing -> keyword hints.
+    """
+    min_exp = to_float(job.get("min_experience"))
+    max_exp = to_float(job.get("max_experience"))
+
+    if max_exp is not None:
+        return max_exp <= MAX_FRESHER_EXPERIENCE_YEARS
+    if min_exp is not None:
+        return min_exp <= MAX_FRESHER_EXPERIENCE_YEARS
+
+    haystack = " ".join(
+        [
+            job.get("title", ""),
+            job.get("description", ""),
+            job.get("skills", ""),
+        ]
+    )
+    parsed_min, parsed_max = extract_experience_from_text(haystack)
+    if parsed_max is not None:
+        return parsed_max <= MAX_FRESHER_EXPERIENCE_YEARS
+    if parsed_min is not None:
+        return parsed_min <= MAX_FRESHER_EXPERIENCE_YEARS
+
+    haystack_lc = haystack.lower()
+    return any(keyword in haystack_lc for keyword in FRESHER_KEYWORDS)
 
 
 def skill_matches(skill, haystack):
@@ -182,6 +269,8 @@ def scrape_indeed(session, query, location, limit):
                 "link": link,
                 "description": "",
                 "skills": "",
+                "min_experience": None,
+                "max_experience": None,
             }
         )
     return jobs
@@ -247,6 +336,8 @@ def scrape_linkedin(session, query, location, limit):
                 "link": link,
                 "description": "",
                 "skills": "",
+                "min_experience": None,
+                "max_experience": None,
             }
         )
         if len(jobs) >= limit:
@@ -296,8 +387,8 @@ def scrape_naukri(session, query, location, limit):
             title = "Untitled role"
 
         description = clean_text(strip_html_tags(row.get("jobDesc", "")))
-        min_exp = row.get("minExp")
-        max_exp = row.get("maxExp")
+        min_exp = to_float(row.get("minExp"))
+        max_exp = to_float(row.get("maxExp"))
         if min_exp is not None and max_exp is not None:
             description = f"{description} Experience: {min_exp}-{max_exp} years.".strip()
 
@@ -311,6 +402,8 @@ def scrape_naukri(session, query, location, limit):
                 "link": link,
                 "description": description,
                 "skills": clean_text(row.get("keywords")),
+                "min_experience": min_exp,
+                "max_experience": max_exp,
             }
         )
         if len(jobs) >= limit:
@@ -365,6 +458,8 @@ def scrape_foundit(session, query, location, limit):
             link = urljoin("https://www.foundit.in", link)
 
         exp = clean_text(row.get("exp"))
+        min_exp = to_float(row.get("minimumExperience"))
+        max_exp = to_float(row.get("maximumExperience"))
         skills = clean_text(row.get("skills"))
         description = skills
         if exp:
@@ -380,6 +475,8 @@ def scrape_foundit(session, query, location, limit):
                 "link": link,
                 "description": description,
                 "skills": skills,
+                "min_experience": min_exp,
+                "max_experience": max_exp,
             }
         )
         if len(jobs) >= limit:
@@ -446,6 +543,10 @@ def scrape_cutshort(session, query, location, limit):
         if not link:
             continue
 
+        exp_range = row.get("expRange") or {}
+        min_exp = to_float(exp_range.get("min"))
+        max_exp = to_float(exp_range.get("max"))
+
         company = clean_text((row.get("companyDetails") or {}).get("name"))
         if not company:
             company = clean_text((row.get("companyId") or {}).get("name"))
@@ -465,6 +566,8 @@ def scrape_cutshort(session, query, location, limit):
                 "link": link,
                 "description": description,
                 "skills": skills,
+                "min_experience": min_exp,
+                "max_experience": max_exp,
             }
         )
         if len(jobs) >= limit:
@@ -514,7 +617,11 @@ def collect_jobs(session, query, location, limit):
 
 def scan_jobs():
     """Fetches jobs from supported sources, dedupes, filters and alerts."""
-    print(f"Scanning for query='{JOB_QUERY}' and location='{JOB_LOCATION}'...")
+    fresher_mode = "ON" if FRESHER_ONLY else "OFF"
+    print(
+        f"Scanning for query='{JOB_QUERY}' and location='{JOB_LOCATION}' "
+        f"(fresher-only: {fresher_mode}, max_exp={MAX_FRESHER_EXPERIENCE_YEARS})..."
+    )
     conn = init_db()
     cursor = conn.cursor()
     session = requests.Session()
@@ -524,9 +631,14 @@ def scan_jobs():
     print(f"Total fetched jobs: {len(jobs)}")
 
     sent_count = 0
+    fresher_skipped = 0
     seen_in_run = set()
     for job in jobs:
         if not clean_text(job.get("link")):
+            continue
+
+        if FRESHER_ONLY and not is_fresher_job(job):
+            fresher_skipped += 1
             continue
 
         job_key = build_job_key(job)
@@ -553,7 +665,7 @@ def scan_jobs():
             print("Failed to send. Not inserting into DB so it can retry later.")
 
     conn.close()
-    print(f"Scan complete. Alerts sent: {sent_count}")
+    print(f"Scan complete. Alerts sent: {sent_count}. Non-fresher skipped: {fresher_skipped}")
 
 
 if __name__ == "__main__":
